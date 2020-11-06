@@ -101,9 +101,7 @@ def plummer(r,L,r_half):
     # L = args[0]
     # r_half = args[1]
     
-    return (3 * L *
-            (4 * np.pi * r_half ** 3) ** (-1) *
-            (1 + r ** 2 / r_half **2 ) ** (-5/2))
+    return (3 * L * (4 * np.pi * r_half ** 3) ** (-1) * (1 + r ** 2 / r_half **2 ) ** (-5/2))
 
 
 # define the function to return the dark matter density distribution for a Burkert profile
@@ -211,14 +209,14 @@ def solve_jeans(r_eval,beta, nu_args, rho_args):
     """ Solves an initial value problem Jeans Equation at the . See salucci et al (2014)
     Attributes
     -----------
-    r_eval : array-like variable
-        Array of radii values at which the initial value problem is solved
-    beta : array like
-        Radial Velocity Dispersion * nu. What is being solved for by the ode Solver
-    nu_args : tuple
-        tuple of argument to be fed into nu_fun. Of form: (L, r_half)
-    M_args : tuple
-        tuple of argument to be fed into M_fun. Of form: (r_core, rho_central
+    r_eval : array-like variable\n
+        Array of radii values at which the initial value problem is solved\n
+    beta : array like\n
+        Radial Velocity Dispersion * nu. What is being solved for by the ODE Solver\n
+    nu_args : tuple\n
+        tuple of argument to be fed into nu_fun. Of form: (L, r_half)\n
+    M_args : tuple\n
+        tuple of argument to be fed into M_fun. Of form: (r_core, rho_central)
     """
     sol = solve_ivp(lambda r, y: jeans_ivp(r,y,beta,nu_args,rho_args),
                     [r_eval[-1],r_eval[0]],

@@ -24,7 +24,7 @@ train_data = data[:7999]
 train_features, train_labels = list(list(zip(*train_data))[0]), list(list(zip(*train_data))[1])
 test_data = data[7999:]
 test_features, test_labels = list(list(zip(*test_data))[0]), list(list(zip(*test_data))[1])
-
+print(1.0 in np.all(test_features) or 1 in np.all(test_features))
 start = timeit.default_timer()
 
 train_tensor = tf.data.Dataset.from_tensor_slices((train_features, train_labels)).shuffle(8000).batch(32)

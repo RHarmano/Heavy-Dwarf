@@ -63,8 +63,6 @@ class num_density(st.rv_continuous):
             
         return cond
     
-    
-    
     def _pdf(self, r, L, r_half):
         #print(args)
         function_mappings = {
@@ -170,7 +168,7 @@ def jeans_ivp(r,U,beta,nu_args,rho_args):
 
 
 # define the function to solve the initial value problem for the jeans equation using the RK23 method
-def solve_jeans(r_eval,beta, nu_args, rho_args):
+def solve_jeans(r_eval, beta, nu_args, rho_args):
     
     """ Solves an initial value problem Jeans Equation at the . See salucci et al (2014)
     Attributes
@@ -372,7 +370,6 @@ if __name__ == "__main__":
     # DM profile parameters
 
     r_eval = np.logspace(-3,6,10000)  # radius array
-
 
     #%% Calculate M and nu for plotting later if needed
     nu = nu_dist(r_eval,nu_args[1],nu_args[2])

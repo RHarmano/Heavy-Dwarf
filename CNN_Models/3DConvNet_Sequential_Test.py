@@ -26,7 +26,6 @@ galaxy_shape = (25, 25, 25, 1)
 
 train_data = data[:7999]
 train_features, train_labels = list(list(zip(*train_data))[0]), list(list(zip(*train_data))[1])
-
 test_data = data[7999:]
 test_features, test_labels = list(list(zip(*test_data))[0]), list(list(zip(*test_data))[1])
 
@@ -37,7 +36,7 @@ test_tensor = tf.data.Dataset.from_tensor_slices((test_features, test_labels)).b
 
 stop = timeit.default_timer()
 print("Training and Test Tensors Generated, Time: ",stop-start)
-
+tf.conv
 # build sequential model using the Keras API
 def build_model():
     # define the model layers using the sequential API

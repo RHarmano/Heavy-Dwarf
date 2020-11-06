@@ -1,7 +1,12 @@
-" ENPH 455 Thesis: Reproducing the Dark Matter Structure of Simulated Dwarf Spheroidal Galaxies using Machine Learning Techniques "
-# Data Preprocessing
-# Robbie Faraday - 20023538
-# Created March 10, 2020
+"""
+Data Preprocessing for K-means Optimization
+
+Author  : Roman Harman
+Date    : September 30, 2020
+
+Adapted for panadas data storage from dataPreprocessing_Classifier.py by Robbie Faraday
+fit_transform call not necessary on data if using sklearn as fit_transform may be called in a pipeline
+"""
 
 # import necessary libraries
 import os
@@ -14,14 +19,13 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 
 # Read in the galaxy metadata
-data_dir = os.getcwd() + '/dSph_data/1000_stars_Mass_Burkert/'
-galaxies = os.listdir(data_dir)
-label_names = ['GalaxyId', 'nu_dist', 'N', 'L', 'r_half', 'DM_dist', 'r_core', 'rho_central', 'beta', 'D', 'DM_mass']
-labels_df = pd.DataFrame(columns = label_names)
+galaxy_data_dir = os.getcwd() + '/dSph_data/1000_stars_Mass_Burkert/'
+metadata_labels = ['GalaxyId', 'nu_dist', 'N', 'L', 'r_half', 'DM_dist', 'r_core', 'rho_central', 'beta', 'D', 'DM_mass']
+parameters_df = pd.DataFrame(columns = metadata_labels)
 
 # data preprocessing function
-def ProcessData(data_dir, labels_df=labels_df):
-
+def strip_data(data_dir, labels_df=parameters_df):
+    galaxies = os.listdir(data_dir)
     galaxy_list = []
     count = 1
     for galaxy in galaxies:
@@ -34,13 +38,11 @@ def ProcessData(data_dir, labels_df=labels_df):
 
         # Standardize the position and velocity values
         scaler = StandardScaler()
-        stars_df[['theta_x', 'theta_y', 'z_velocity']] = scaler.fit_transform(stars_df[['theta_x', 'theta_y', 'z_velocity']]) # standardization, zero-mean
-
+        stars_df[['theta_x', 'theta_y', 'z_velocity']] = scaler.fit_transform(stars_df[['theta_x', 'theta_y', 'z_velocity']]) # standardization
         stars_data = stars_df.to_numpy()
 
         # Generate 3D histogram of the data to bin the stars based on theta_x, theta_y, vz_velocity
-        stars_hist, bin_div = np.histogramdd(stars_data, bins=20, density=False)
-        print(stars_hist)
+        stars_hist, bin_div = np.histogramdd(stars_data, bins=50, density=False)
 
         stars_hist = np.expand_dims(stars_hist, axis=3)
         galaxy_list.append(stars_hist)
@@ -48,7 +50,6 @@ def ProcessData(data_dir, labels_df=labels_df):
         if count % 100 == 0:
             print('Galaxies Processed: ', count)
         count += 1
-    
 
 
     labels_df[['rho_central', 'r_core', 'DM_mass']] = scaler.fit_transform(labels_df[['rho_central', 'r_core', 'DM_mass']])
@@ -69,14 +70,14 @@ if not os.path.isdir("./dSph_data/ProcessedData"):
         os.mkdir("./dSph_data/ProcessedData")
 
 #call preprocessing function to process the raw data
-galaxy_list, rho_list, core_list, mass_list = ProcessData(data_dir)
+galaxy_list, rho_list, core_list, mass_list = strip_data(galaxy_data_dir)
 
 # compile data and labels into list of tuples
 galaxy_data_rho = list(zip(galaxy_list, rho_list))  # data to predict central halo density
 galaxy_data_core = list(zip(galaxy_list, core_list))  # data to predict core radius 
 galaxy_data_mass = list(zip(galaxy_list, mass_list))  # data to predict DM mass
 
-# save the processed data to a single file
-np.save('./dSph_data/ProcessedData/dSph_Processed_Data_10K_Regress_Rho', galaxy_data_rho)
-np.save('./dSph_data/ProcessedData/dSph_Processed_Data_10K_Regress_Core', galaxy_data_core)
-np.save('./dSph_data/ProcessedData/dSph_Processed_Data_10K_Regress_Mass', galaxy_data_mass)
+# save the dataframe for later access
+np.save('./dSph_data/ProcessedData/dSph_Processed_Data_KMeans_rho', galaxy_data_rho)
+np.save('./dSph_data/ProcessedData/dSph_Processed_Data_KMeans_core', galaxy_data_core)
+np.save('./dSph_data/ProcessedData/dSph_Processed_Data_KMeans_mass', galaxy_data_mass)

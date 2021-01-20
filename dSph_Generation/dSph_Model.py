@@ -17,6 +17,8 @@
 
 import numpy as np
 import pandas as pd
+import math
+import matplotlib.pyplot as plt
 import scipy.stats as stat
 import scipy.stats.distributions as st
 from scipy.integrate import quad, solve_ivp
@@ -29,21 +31,20 @@ class disk_gen(st.rv_continuous):
     """Volumetric mass density of stars within the Disk"""
     def _pdf(self, r, z):
         H = 2.75e3 # length scale of the disk [pc]
-        solar_mass = 2e30 # mass of the sun, common mass scale in astrophysics [kg]
-        rho_0_disk = 0.0493*solar_mass # central disk density [kg/pc^2]
+        solar_mass = 1 # mass of the sun, common mass scale in astrophysics [solar mass]
+        rho_0_disk = 0.0493*solar_mass # central disk density [M_odot/pc^2]
         beta_disk = 0.565 # orbital anisotropy of stars in the disk []
         h1 = 270 # [pc]
         h2 = 440 # [pc]
         R_0 = 8e3 # ~radius where bulge -> disk [pc]
 
-        nu_disk = np.array([])
         try:
+            nu_disk = np.zeros(shape=(len(r), 1))
             for i in range(len(r)):
-                nu_disk.append(np.max([r[i]/9025+0.114, 0.670]))
-        except Exception:
-            nu_disk = [np.max([r/9025+0.114, 0.670])]
+                nu_disk[i,1] = np.maximum(r[i]/9025+0.114, 0.670)
+        except:
+            nu_disk = np.array([np.maximum(r/9025+0.114, 0.670)])
         R, Z = np.meshgrid(r, z) # need a meshgrid for cylindrical distribution
-        nu_disk = np.array(nu_disk)
         hypsec = stat.hypsecant.pdf(Z/nu_disk*h1)
         disk_density = ((rho_0_disk/nu_disk)*np.exp(-(R-R_0)/H)*
                         ((1-beta_disk)*hypsec**2+beta_disk*np.exp(-abs(Z)/(nu_disk*h2)))) # [solar masses/pc^3]
@@ -51,15 +52,22 @@ class disk_gen(st.rv_continuous):
 
 class bulge_gen(st.rv_continuous):
     """Volumetric mass density of stars within the Bulge"""
-    def _pdf(self, s):
+    def inner_dist(self, s):
+        inner_bulge_dist = 1.04e6*(s/0.482)**(-1.85) # [solar masses/pc^3]    
+        return inner_bulge_dist
+    def outer_dist(self, s):
+        outer_bulge_dist = 3.53*kv(0, (s/667)) # [solar masses/pc^3]
+        return outer_bulge_dist
+    def _pdf(self, r, z):
         piecewise_shift = 938 # [pc]
-
-        s_inner = s[s < piecewise_shift]
-        s_outer = s[s >= piecewise_shift]
-
-        inner_bulge_dist = 1.04e6*(s_inner/0.482)**(-1.85) # [solar masses/pc^3]
-        outer_bulge_dist = 3.53*kv(0, (s_outer/667)) # [solar masses/pc^3]
-        bulge_density = np.append(inner_bulge_dist, outer_bulge_dist)
+        s = (r**2+z**2)**0.5
+        bulge_density = np.zeros(shape=s.shape)
+        for i in range(r.shape[0]):
+            for j in range(r.shape[1]):
+                if s[i,j] < piecewise_shift:
+                    bulge_density[i,j] = self.inner_dist(s[i,j])
+                else:
+                    bulge_density[i,j] = self.outer_dist(s[i,j])
         return bulge_density
 
 class halo_gen(st.rv_continuous):
@@ -81,6 +89,42 @@ class halo_gen(st.rv_continuous):
         rho_D = disk_object._pdf(r=R_solar, z=0)
         return rho_D*f_H*(R_solar/(r**2+(z/q_H)**2)**(1/2))**(n_H)
 
+class chabrier_imf(st.rv_continuous):
+    """
+    IMF distribution.
+
+    See https://en.wikipedia.org/wiki/Initial_mass_function for the gist 
+    or https://sites.astro.caltech.edu/~ccs/ay124/chabrier03_imf.pdf for primary sources.
+    """
+
+    def _pdf(self, m):
+        if m <= 1 :
+            return 0.158*(1/(math.log(10)*m))*np.exp(-(math.log(m, 10)-math.log(0.08, 10))**2/(2*0.69**2))
+        if m > 1:
+            return m**(-2.3)
+
+class mw_num_density(st.rv_continuous):
+    """
+    Combined number density of halo, thin and thick disk stars. The bulge is a
+    bit trickier, but a 'synthetic bulge' approach is considered, as seen in:
+
+    https://arxiv.org/pdf/1308.0593v1.pdf
+    """
+
+    def _pdf(self, r, z, Z_solar, rho_D_0, L1, H1, f, L2, H2, f_H):
+        """
+        The disk & halo  number density, parameters given in Table 3
+        
+        https://faculty.washington.edu/ivezic/Publications/tomographyI.pdf
+        """
+        
+        q_H = 0.6 # ~0.5-1 for common values, most recent as of above source for MW was 0.6; halo ellipticity
+        R_solar = 2.25461e-8 # astronomical constant
+        n_H = 2.6 # ~2.5-3.0 fit parameter
+        halo_num_density = rho_D_0*f_H*(R_solar/(r**2+(z/q_H)**2)**(1/2))**(n_H)
+        thin_disk_num_density = rho_D_0*np.exp(R_solar/L1)*np.exp(-abs(r)/L1)*np.exp(-abs(z+Z_solar)/H1)
+        thick_disk_num_density = rho_D_0*np.exp(R_solar/L2)*np.exp(-abs(r)/L2)*np.exp(-abs(z+Z_solar)/H2)
+        return halo_num_density + thin_disk_num_density + f*thick_disk_num_density
 
 class dSph_Model():
     """
@@ -140,8 +184,8 @@ class dSph_Model():
         """
         
         return ( 
-                3 * L *(4 * np.pi * r_half ** 3) ** (-1) *
-                (1 + r ** 2 / r_half **2 ) ** (-5/2)
+                    3 * L *(4 * np.pi * r_half ** 3) ** (-1) *
+                    (1 + r ** 2 / r_half **2 ) ** (-5/2)
                 )
 
     def burkert(self, r):
@@ -272,7 +316,7 @@ class dSph_Model():
         theta_disp = self.angular_dispersion_from_radial(radial_disp)
         phi_disp = theta_disp
 
-        return (radial_disp,theta_disp,phi_disp)
+        return (radial_disp, theta_disp, phi_disp)
 
     def select_random_dist(self):
         """
@@ -328,7 +372,7 @@ class dSph_Model():
         phi_dist = st.uniform(scale=2 * np.pi)
         
         # phi, theta grid
-        theta = np.linspace(0, np.pi, N),
+        theta = np.linspace(0, np.pi, N)
         phi = np.linspace(0, 2 * np.pi, N)
         
         # sample phi and theta equally in 3d space
@@ -382,6 +426,37 @@ class dSph_Model():
 
         return dSph_project
 
+    def gen_mw_foreground_num_density(self, r, z):
+        """
+        Generates the number density distribution using fit parameters for the disk & halo using:
+
+        https://faculty.washington.edu/ivezic/Publications/tomographyI.pdf
+        parameters are in Table 3.
+
+        Parameters are determined by r-i bins.
+        TABLE3Best-Fit Values (Joint Fits, Bright Parallax Relation)2Bin(R;0)L1H1fL2H2fH1.61.......   1:3<r-i<1:4  0.0058  2150 245 0.13 3261 743...1:2<ri<1:3  0.00541:1<ri<1:2  0.00461:0<ri<1:1  0.00381.70.......   0:9<ri<1:0  0.0032  2862 251 0.12 3939 647 0.005070:8<ri<0:9  0.00270:7<ri<0:8  0.00240:65<ri<0:7  0.0011
+        """
+
+        num_density_mw_bodies  = mw_num_density()
+        rhoD_0 = 1e-3*np.array([5.8, 5.4, 4.6, 3.8, 3.2, 2.7, 2.4, 1.1])
+        L1 = np.array([2150, 2862])
+        L2 = np.array([3261, 3939])
+        H1 = np.array([245, 251])
+        H2 = np.array([743, 647])
+        f = np.array([0.13, 0.12])
+        f_H = np.array([0.0, 0.00507])
+        Z_solar = 10 # 10-50 [pc] depending on paper consulted
+
+        density_matrix = num_density_mw_bodies._pdf(r, z, Z_solar, rhoD_0[0], L1[0], H1[0], f[0], L2[0], H2[0], f_H[0])
+        # parameters switch to include stars bright enough to be visible in the halo, around 1.0 > r-i > 0.9
+        for red_index in range(1, len(rhoD_0)):
+            if red_index >= 4:
+                density_matrix += num_density_mw_bodies._pdf(r, z, Z_solar, rhoD_0[red_index], L1[1], H1[1], f[1], L2[1], H2[1], f_H[1])
+            else:
+                density_matrix += num_density_mw_bodies._pdf(r, z, Z_solar, rhoD_0[red_index], L1[0], H1[0], f[0], L2[0], H2[0], f_H[0])
+        
+        return density_matrix
+
     def gen_disk_foreground(self, r, z):
         """
         Generates a distribution of stars in the disk of the Milky Way that
@@ -408,7 +483,7 @@ class dSph_Model():
         
         return disk_dist
         
-    def gen_bulge_foreground(self, s):
+    def gen_bulge_foreground(self, r, z):
         """
         Generates a distribution of stars in the "Bulge" around the centroid of the Milky Way 
         to obstruct dSph galaxies beyond the opposite side of the Milky Way.
@@ -428,7 +503,7 @@ class dSph_Model():
         """
 
         bulge_density = bulge_gen()
-        bulge_dist = bulge_density._pdf(s)
+        bulge_dist = bulge_density._pdf(r, z)
 
         return bulge_dist
 
@@ -454,3 +529,117 @@ class dSph_Model():
         halo_dist = halo_density._pdf(r, z)
 
         return halo_dist
+
+    def chabrier_sample(self, m):
+        """
+        Provides the change in number of stars per mass bin with respect to the mass in question
+        """
+
+        # IMPORTANT: this is dN/dm and needs the offset still!
+        imf_pdf = chabrier_imf(name='chabrier_imf')._pdf
+        if len(m) > 1:
+            chabrier_array = np.array([])
+            for mass in m:
+                chabrier_array = np.append(chabrier_array, imf_pdf(mass))
+            return chabrier_array
+        else:
+            return imf_pdf(m)
+
+    def imf(self, mmin=0.01, mmax=100, Mcm=10000, imf_type=0, SFE=0.03):
+        """
+        Generates a sample distribution for the Chabrier IMF
+        """
+        mmin_log = np.log10(mmin)
+        mmax_log = np.log10(mmax)
+
+        chunksize = 10
+        result = np.array([], dtype=np.float64)
+        while result.sum() < SFE * Mcm:
+            m = np.random.uniform(mmin_log, mmax_log, size=chunksize)
+            m_mask = m > 0
+            x = np.random.uniform(0, 1, size=chunksize)
+            result = np.hstack((result, 10 ** m[x < self.chabrier_sample(m)]))
+
+        return result[result.cumsum() < SFE * Mcm]
+
+    def anotherDMdensityFunction(self, r, profile, rs, g, rho0, R0):
+        """
+        DM density functions by profile given
+        """
+        if (profile == 'NFW'):
+            a = 1;
+            b = 3;
+            rhos  = rho0/(2**((b-g)/a))*(R0/rs)**g*(1+(R0/rs)**a)**((b-g)/a); # DM Density at r        
+            rho = rhos*(2**((b-g)/a))/((r/rs)**g)/((1+(r/rs)**a)**((b-g)/a));
+            return rho
+
+        elif (profile == 'Einasto'):
+            rhos = rho0*np.exp(2/g*((R0/rs)**g-1));
+            rho = rhos*np.exp(-2/g*((r/rs)**g-1));
+            return rho
+
+        elif (profile == 'Burkert'):
+            u = r/rs;
+            rhos=rho0*(1+u)*(1+u**2);
+            rho = rhos/(1+u)/(1+u**2);
+            return rho
+        
+        else:
+            return 
+
+    def phidm(self, r, profile, rs, g, rho0, R0):
+        """
+        
+        """
+        self.cm = 1e-2;
+        phi = np.zeros(shape=(1,len(r)))
+        rho_integrand = lambda x : x**2*self.anotherDMdensityFunction(x, profile, rs, g, rho0, R0)*self.GeV/(self.cm**3)
+        for i in range(len(r)):
+            phi[i] = -4*np.pi*self.kpc*self.GN/r[i]**2*quad(rho_integrand, 0, r[i])
+        return phi
+
+    def bulge_omega(self, r):
+        """
+
+        """
+        co = 0.6 # kpc
+        dphidr = -1/(r+co)**2
+        return dphidr
+
+    def disk_omega(self, r):
+        """
+
+        """
+        bd = 4 #kpc
+        dphidr = -1/r**2*(1-np.exp(-r/bd)) + 1/(r*bd)*np.exp(-r/bd)
+        return dphidr
+
+    def MW_velocity_dispersions(self, r, profile, rs, g, rho0, R0):
+        """
+        Calculation of velocity dispersions using the Jeans relationship for teh disk, bulge and DM in the MW
+        """
+        self.Msun = 2e30 # kg
+        self.Mb = 1.5e10*Msun # kg Bulge mass
+        self.Md = 7e10*Msun # kg Disk mass
+        self.GN = 6.67e-11 # SI units
+        self.kpc = 3.086e19 # m
+        self.GeV = 1.78e-27 # kg
+
+        dm_disp, bulge_disp, disk_disp = np.zeros(shape=(1,len(r)))
+
+        phi_bulge = lambda r : self.GN*self.Mb/self.kpc**2*self.bulge_omega(r)
+        phi_disk = lambda r : self.GN*self.Md/self.kpc**2*self.disk_omega(r)
+        rhodm = lambda x : self.anotherDMdensityFunction(x, profile, rs, g, rho0, R0)
+
+        DMintegrand = lambda x : rhodm(x)*self.phidm(x, profile, rs, g, rho0, R0)
+        BulgeIntegrand = lambda x : self.rhodm(x)*phi_bulge(x)
+        DiskIntegrand = lambda x : self.rhodm(x)*phi_disk(x)
+
+        for i in range(len(r)):
+            dm_disp[i] = 1/rhodm(r[i])*quad(DMintegrand, np.inf, r[i])*self.kpc
+            bulge_disp[i] = 1/rhodm(r[i])*quad(BulgeIntegrand, np.inf, r[i])*self.kpc
+            disk_disp[i] = 1/rhodm(r[i])*quad(DiskIntegrand, np.inf, r[i])*self.kpc
+        
+        total_disp = dm_disp + bulge_disp + disk_disp
+
+        return [total_disp, dm_disp, bulge_disp, disk_disp]

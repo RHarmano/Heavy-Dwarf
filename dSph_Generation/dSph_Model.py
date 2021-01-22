@@ -95,13 +95,20 @@ class chabrier_imf(st.rv_continuous):
 
     See https://en.wikipedia.org/wiki/Initial_mass_function for the gist 
     or https://sites.astro.caltech.edu/~ccs/ay124/chabrier03_imf.pdf for primary sources.
+
+    Assumes the mass array is 10**(m)
+
     """
 
     def _pdf(self, m):
-        if m <= 1 :
-            return 0.158*(1/(math.log(10)*m))*np.exp(-(math.log(m, 10)-math.log(0.08, 10))**2/(2*0.69**2))
-        if m > 1:
-            return m**(-2.3)
+        A_1 = 0.158 # fit constant
+        M_C = np.log10(0.079) # another fit constant
+        sigma2 = 0.69**2    # it's based on a statistical distribution, so of course it has sigma = 0.69!
+        alpha = -2.3    # based on the Salpeter distribution
+
+        a1 = A_1 * np.exp(-((m - M_C) ** 2) / 2.0 / sigma2)
+        a2 = 2 * (10.0 ** m) ** alpha
+        return np.where(m <= 0, a1, a2)
 
 class mw_num_density(st.rv_continuous):
     """
@@ -545,7 +552,7 @@ class dSph_Model():
         else:
             return imf_pdf(m)
 
-    def imf(self, mmin=0.01, mmax=100, Mcm=10000, imf_type=0, SFE=0.03):
+    def imf(self, mmin=0.01, mmax=100, Mcm=10000, imf_type='Chabrier', SFE=0.03):
         """
         Generates a sample distribution for the Chabrier IMF
         """
@@ -554,9 +561,9 @@ class dSph_Model():
 
         chunksize = 10
         result = np.array([], dtype=np.float64)
+
         while result.sum() < SFE * Mcm:
             m = np.random.uniform(mmin_log, mmax_log, size=chunksize)
-            m_mask = m > 0
             x = np.random.uniform(0, 1, size=chunksize)
             result = np.hstack((result, 10 ** m[x < self.chabrier_sample(m)]))
 
@@ -616,7 +623,7 @@ class dSph_Model():
 
     def MW_velocity_dispersions(self, r, profile, rs, g, rho0, R0):
         """
-        Calculation of velocity dispersions using the Jeans relationship for teh disk, bulge and DM in the MW
+        Calculation of velocity dispersions using the Jeans relationship for the disk, bulge and DM in the MW
         """
         self.Msun = 2e30 # kg
         self.Mb = 1.5e10*Msun # kg Bulge mass

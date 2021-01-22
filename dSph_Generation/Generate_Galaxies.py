@@ -123,7 +123,7 @@ if __name__ == '__main__':
 
             # Produce the galaxy distribution and add it to the dataframe
             R, Z = np.meshgrid(r_eval, z_array)
-            disk_density = dSph_galaxy_model.gen_disk_foreground(r_eval, z_array)
+            # disk_density = dSph_galaxy_model.gen_disk_foreground(r_eval, z_array)
             print(dSph_galaxy_model.imf())
             # bulge_density = dSph_galaxy_model.gen_bulge_foreground(R, Z)
             # disk_density += bulge_density

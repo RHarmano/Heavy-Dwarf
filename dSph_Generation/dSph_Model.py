@@ -26,6 +26,7 @@ from scipy.interpolate import interp1d
 from scipy.special import kv
 import os
 import datetime
+import random
 
 class disk_gen(st.rv_continuous):
     """Volumetric mass density of stars within the Disk"""
@@ -464,7 +465,7 @@ class dSph_Model():
         
         return density_matrix
 
-    def gen_disk_foreground(self, r, z):
+    def gen_disk_pdf(self, r, z):
         """
         Generates a distribution of stars in the disk of the Milky Way that
         obstruct the view of dSph galaxies as foreground.
@@ -490,7 +491,7 @@ class dSph_Model():
         
         return disk_dist
         
-    def gen_bulge_foreground(self, r, z):
+    def gen_bulge_pdf(self, r, z):
         """
         Generates a distribution of stars in the "Bulge" around the centroid of the Milky Way 
         to obstruct dSph galaxies beyond the opposite side of the Milky Way.
@@ -514,7 +515,7 @@ class dSph_Model():
 
         return bulge_dist
 
-    def gen_halo_foreground(self, r, z):
+    def gen_halo_pdf(self, r, z):
         """
         Generates foreground stars that occur in halos using best fit parameters as of 2002 (in the process of looking
         for updated parameters to see if the model is still valid).
@@ -552,7 +553,7 @@ class dSph_Model():
         else:
             return imf_pdf(m)
 
-    def imf(self, mmin=0.01, mmax=100, Mcm=10000, imf_type='Chabrier', SFE=0.03):
+    def imf(self, local_density, mmin=0.01, mmax=100, Mcm=10000, imf_type='Chabrier'):
         """
         Generates a sample distribution for the Chabrier IMF
         """
@@ -562,12 +563,33 @@ class dSph_Model():
         chunksize = 10
         result = np.array([], dtype=np.float64)
 
-        while result.sum() < SFE * Mcm:
+        while result.sum() < local_density:
             m = np.random.uniform(mmin_log, mmax_log, size=chunksize)
             x = np.random.uniform(0, 1, size=chunksize)
             result = np.hstack((result, 10 ** m[x < self.chabrier_sample(m)]))
 
-        return result[result.cumsum() < SFE * Mcm]
+        return result[result.cumsum() < local_density]
+
+    def generate_stars_position(self, r, z):
+        """
+        Creates stars distributed at random intervals on the cylinder using finite control volumes
+        at the given radii and distances from the galactic plane.
+        
+        Parameters
+        ----------
+        r : array_like \n
+        Radii from the galactic centre (MUST NOT INCLUDE 0). \n
+        z : array_like \n
+        Distance perpendicular to the galactic plane (not disk).
+        """
+        [R, Z] = np.meshgrid(r, z) # matrix needed for random generation
+        theta = list(map(lambda x : np.transpose(np.linspace(-1/x, 1/x)), r)) # generates a theta map such that the volume of the CV is held at 1 pc^3
+        phi = np.arange(0, 2*np.pi, np.pi/100) # intervals around the galactic centre, function of r to prevent overlap of CVs
+        for ri in range(len(r)):
+            for zi in range(len(z)):
+                
+
+        return stars_frame
 
     def anotherDMdensityFunction(self, r, profile, rs, g, rho0, R0):
         """

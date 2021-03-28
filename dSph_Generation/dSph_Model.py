@@ -24,12 +24,27 @@ import scipy.stats.distributions as st
 from scipy.integrate import quad, solve_ivp
 from scipy.interpolate import interp1d
 from scipy.special import kv
+import scipy as sci
 import os
 import datetime
 import random
 
 class disk_gen(st.rv_continuous):
-    """Volumetric mass density of stars within the Disk"""
+    """
+    Volumetric mass density of stars within the Disk
+    
+    Parameters
+    ----------
+    r : numpy array \n
+        Mesh grid of radii from the galactic centre. \n
+    z : numpy array \n
+        Mesh grid of distance from the galactic plane. \n
+
+    Returns
+    -------
+    disk_density : aray-like \n
+        The local stellar mass density contribution from the disk.
+    """
     def _pdf(self, r, z):
         H = 2.75e3 # length scale of the disk [pc]
         solar_mass = 1 # mass of the sun, common mass scale in astrophysics [solar mass]
@@ -39,20 +54,37 @@ class disk_gen(st.rv_continuous):
         h2 = 440 # [pc]
         R_0 = 8e3 # ~radius where bulge -> disk [pc]
 
-        try:
-            nu_disk = np.zeros(shape=(len(r), 1))
-            for i in range(len(r)):
-                nu_disk[i,1] = np.maximum(r[i]/9025+0.114, 0.670)
-        except:
-            nu_disk = np.array([np.maximum(r/9025+0.114, 0.670)])
-        R, Z = np.meshgrid(r, z) # need a meshgrid for cylindrical distribution
-        hypsec = stat.hypsecant.pdf(Z/nu_disk*h1)
-        disk_density = ((rho_0_disk/nu_disk)*np.exp(-(R-R_0)/H)*
-                        ((1-beta_disk)*hypsec**2+beta_disk*np.exp(-abs(Z)/(nu_disk*h2)))) # [solar masses/pc^3]
+        # need to check to see if r is a single value or multiple
+        if hasattr(range, '__len__') or isinstance(r, list):
+            r = np.asarray(r) # cast to array if list
+            if len(r.shape) > 1:
+                nu_disk = np.fromiter(map(lambda x : np.maximum(x[0] / 9025 + 0.114, 0.670), r), np.float64)
+            else:
+                nu_disk = np.fromiter(map(lambda x : np.maximum(x / 9025 + 0.114, 0.670), r), np.float64)
+        else:
+            nu_disk = np.maximum(r / 9025 + 0.114, 0.670)
+
+        hypsec = stat.hypsecant.pdf(z/nu_disk*h1)
+        disk_density = ((rho_0_disk/nu_disk)*np.exp(-(r-R_0)/H)*
+                        ((1-beta_disk)*hypsec**2+beta_disk*np.exp(-abs(z)/(nu_disk*h2)))) # [solar masses/pc^3]
         return disk_density
 
 class bulge_gen(st.rv_continuous):
-    """Volumetric mass density of stars within the Bulge"""
+    """
+    Volumetric mass density of stars within the Bulge
+    
+    Parameters
+    ----------
+    r : aray-like \n
+        Mesh grid of radii from the galactic centre. \n
+    z : aray-like \n
+        Mesh grid of distance from the galactic plane. \n
+
+    Returns
+    -------
+    bulge_density : aray-like \n
+        The local stellar mass density contribution from the bulge.
+    """
     def inner_dist(self, s):
         inner_bulge_dist = 1.04e6*(s/0.482)**(-1.85) # [solar masses/pc^3]    
         return inner_bulge_dist
@@ -61,34 +93,43 @@ class bulge_gen(st.rv_continuous):
         return outer_bulge_dist
     def _pdf(self, r, z):
         piecewise_shift = 938 # [pc]
-        s = (r**2+z**2)**0.5
-        bulge_density = np.zeros(shape=s.shape)
-        for i in range(r.shape[0]):
-            for j in range(r.shape[1]):
-                if s[i,j] < piecewise_shift:
-                    bulge_density[i,j] = self.inner_dist(s[i,j])
-                else:
-                    bulge_density[i,j] = self.outer_dist(s[i,j])
+        s = np.sqrt(r**2 + z**2)
+        if hasattr(s, '__len__') or isinstance(s, list):
+            s = np.asarray(s)
+            inner_density = list(map(lambda x : self.inner_dist(x), s[s < piecewise_shift]))
+            outer_density = list(map(lambda x : self.outer_dist(x), s[s >= piecewise_shift]))
+            bulge_density = np.asarray(inner_density + outer_density)
+            # for i in range(r.shape[0]):
+            #     for j in range(r.shape[1]):
+            #         if s[i,j] < piecewise_shift:
+            #             bulge_density[i,j] = self.inner_dist(s[i,j])
+            #         else:
+            #             bulge_density[i,j] = self.outer_dist(s[i,j])
+        else:
+            if s < piecewise_shift:
+                bulge_density = self.inner_dist(s)
+            else:
+                bulge_density = self.outer_dist(s)
         return bulge_density
 
-class halo_gen(st.rv_continuous):
-    """
-    Number density of stars within the "halo" of the galaxy
-    simplified as an ellipsoidal model.
+# class halo_gen(st.rv_continuous):
+#     """
+#     Number density of stars within the "halo" of the galaxy
+#     simplified as an ellipsoidal model.
 
-    Values exist more as ranges for best fit parameters, so typical ranges will
-    be provided next to them.
+#     Values exist more as ranges for best fit parameters, so typical ranges will
+#     be provided next to them.
 
-    https://arxiv.org/pdf/astro-ph/0510520.pdf
-    """
-    def _pdf(self, r, z):
-        q_H = 0.6 # ~0.5-1 for common values, most recent as of above source for MW was 0.6; halo ellipticity
-        R_solar = 2.25461e-8 # astronomical constant
-        n_H = 2.6 # ~2.5-3.0 fit parameter
-        f_H = 1e-3 # halo normalization relative to the thin disk, i.e. rho_D(r=R_solar, z=0)
-        disk_object = disk_gen()
-        rho_D = disk_object._pdf(r=R_solar, z=0)
-        return rho_D*f_H*(R_solar/(r**2+(z/q_H)**2)**(1/2))**(n_H)
+#     https://arxiv.org/pdf/astro-ph/0510520.pdf
+#     """
+#     def _pdf(self, r, z):
+#         q_H = 0.6 # ~0.5-1 for common values, most recent as of above source for MW was 0.6; halo ellipticity
+#         R_solar = 2.25461e-8 # astronomical constant
+#         n_H = 2.6 # ~2.5-3.0 fit parameter
+#         f_H = 1e-3 # halo normalization relative to the thin disk, i.e. rho_D(r=R_solar, z=0)
+#         disk_object = disk_gen()
+#         rho_D = disk_object._pdf(r=R_solar, z=0)
+#         return rho_D*f_H*(R_solar/(r**2+(z/q_H)**2)**(1/2))**(n_H)
 
 class chabrier_imf(st.rv_continuous):
     """
@@ -97,44 +138,59 @@ class chabrier_imf(st.rv_continuous):
     See https://en.wikipedia.org/wiki/Initial_mass_function for the gist 
     or https://sites.astro.caltech.edu/~ccs/ay124/chabrier03_imf.pdf for primary sources.
 
-    Assumes the mass array is 10**(m)
+    Sets the minimum allowable sample value with a and maximum with b, both representative of the smallest observable
+    masses found and setting the upper limit due to greatly diminshing relative abundance.
 
     """
+    def __init__(self, momtype=1, a=10**(-2), b=10**3, xtol=1e-14, badvalue=None, name=None, longname=None, shapes=None, extradoc=None, seed=None):
+        super().__init__(momtype=momtype, a=a, b=b, xtol=xtol, badvalue=badvalue, name=name, longname=longname, shapes=shapes, extradoc=extradoc, seed=seed)
 
     def _pdf(self, m):
-        A_1 = 0.158 # fit constant
         M_C = np.log10(0.079) # another fit constant
         sigma2 = 0.69**2    # it's based on a statistical distribution, so of course it has sigma = 0.69!
-        alpha = -2.3    # based on the Salpeter distribution
+        alpha = 1.3    # based on the Salpeter distribution
+        A_1 = 0.158     # fit constant
+        A_2 = 4.43*10**(-2) # fit constant
+        A_bound = np.exp(-(M_C ** 2) / 2.0 / sigma2) # value of the function at the piecewise boundary
+        C_norm = 0.2171675868106134 # integral over the given bounds, used for normalization
 
-        a1 = A_1 * np.exp(-((m - M_C) ** 2) / 2.0 / sigma2)
-        a2 = 2 * (10.0 ** m) ** alpha
-        return np.where(m <= 0, a1, a2)
+        a1 = A_1 / C_norm * np.exp(-((np.log10(m) - M_C) ** 2) / 2.0 / sigma2)
+        a2 = A_2 / C_norm * m ** (-alpha)
+        return np.where(m <= 1, a1, a2)
 
-class mw_num_density(st.rv_continuous):
-    """
-    Combined number density of halo, thin and thick disk stars. The bulge is a
-    bit trickier, but a 'synthetic bulge' approach is considered, as seen in:
+    def _rvs(self):
+        xbounds = [self.a, self.b]
+        pmax = self._pdf(self.a)
+        while True:
+            x = np.random.rand(1)*(xbounds[1]-xbounds[0])+xbounds[0]
+            y = np.random.rand(1)*pmax
+            if y<=self._pdf(x):
+                return x
 
-    https://arxiv.org/pdf/1308.0593v1.pdf
-    """
+# class mw_num_density(st.rv_continuous):
+#     """
+#     Combined number density of halo, thin and thick disk stars. The bulge is a
+#     bit trickier, but a 'synthetic bulge' approach is considered, as seen in:
 
-    def _pdf(self, r, z, Z_solar, rho_D_0, L1, H1, f, L2, H2, f_H):
-        """
-        The disk & halo  number density, parameters given in Table 3
+#     https://arxiv.org/pdf/1308.0593v1.pdf
+#     """
+
+#     def _pdf(self, r, z, Z_solar, rho_D_0, L1, H1, f, L2, H2, f_H):
+#         """
+#         The disk & halo  number density, parameters given in Table 3
         
-        https://faculty.washington.edu/ivezic/Publications/tomographyI.pdf
-        """
+#         https://faculty.washington.edu/ivezic/Publications/tomographyI.pdf
+#         """
         
-        q_H = 0.6 # ~0.5-1 for common values, most recent as of above source for MW was 0.6; halo ellipticity
-        R_solar = 2.25461e-8 # astronomical constant
-        n_H = 2.6 # ~2.5-3.0 fit parameter
-        halo_num_density = rho_D_0*f_H*(R_solar/(r**2+(z/q_H)**2)**(1/2))**(n_H)
-        thin_disk_num_density = rho_D_0*np.exp(R_solar/L1)*np.exp(-abs(r)/L1)*np.exp(-abs(z+Z_solar)/H1)
-        thick_disk_num_density = rho_D_0*np.exp(R_solar/L2)*np.exp(-abs(r)/L2)*np.exp(-abs(z+Z_solar)/H2)
-        return halo_num_density + thin_disk_num_density + f*thick_disk_num_density
+#         q_H = 0.6 # ~0.5-1 for common values, most recent as of above source for MW was 0.6; halo ellipticity
+#         R_solar = 2.25461e-8 # astronomical constant
+#         n_H = 2.6 # ~2.5-3.0 fit parameter
+#         halo_num_density = rho_D_0*f_H*(R_solar/(r**2+(z/q_H)**2)**(1/2))**(n_H)
+#         thin_disk_num_density = rho_D_0*np.exp(R_solar/L1)*np.exp(-abs(r)/L1)*np.exp(-abs(z+Z_solar)/H1)
+#         thick_disk_num_density = rho_D_0*np.exp(R_solar/L2)*np.exp(-abs(r)/L2)*np.exp(-abs(z+Z_solar)/H2)
+#         return halo_num_density + thin_disk_num_density + f*thick_disk_num_density
 
-class dSph_Model():
+class GenerateDSPH():
     """
     A class to encapsulate the generation of a dSph galaxy using both
     Burkert and NFW DM distribution methods, allowing for the
@@ -174,6 +230,44 @@ class dSph_Model():
         self.beta = beta
         self.M_200 = M_200
         self.c_param = c_param    
+
+    def cylRay2Sph(self, r, z):
+        """
+        Converts a 1D or 2D array of cylindrical r and z co-ordinates to their spherical radial
+        equivalent. (Meant for internal class use)
+
+        Parameters
+        ----------
+        r : array-like \n
+            Radius array, either 1D or 2D.
+        z : array-like \n
+            Distance from galactic plane array, either 1D or 2D.
+
+        Returns
+        -------
+        s : array-like \n
+            1D array of the spherical radial component corresponding to the
+            same index r and z values.
+        """
+        if r.shape != z.shape:
+            print("r and z dimensions do not match shape of r is: "+r.shape+ " and shape of z is: "+z.shape)
+            return None
+        if r.shape[1] == 1:
+            s = np.zeros(shape=(len(r), len(z)))
+            for ri in range(0, len(r)):
+                for zi in range(0, len(z)):
+                    s[ri, zi] = np.sqrt(r[ri]**2 + z[zi]**2) # every r applied with every z
+        if r.shape[1] > 1:
+            r = r[0, :] # every unique r
+            z = z[0, :] # every unique z
+            s = np.zeros(shape=(len(r), len(z)))
+            for ri in range(0, len(r)):
+                for zi in range(0, len(z)):
+                    s[ri, zi] = np.sqrt(r[ri]**2 + z[zi]**2) # every r applied with every z
+
+        s.reshape(1, s.size) # reshape the spherically symmetric radius so it's compatible with the velocity calculation functions
+
+        return s
 
     # dSph functions
     def plummer(self, r, L, r_half):
@@ -343,7 +437,8 @@ class dSph_Model():
                                      0, np.inf,
                                      args=(self.L, self.r_half)) 
 
-        return ((1/self.normal_const[0]) * 
+        return (
+                (1/self.normal_const[0]) * 
                 self.nu_function(r, self.L, self.r_half)
                 )
 
@@ -434,36 +529,7 @@ class dSph_Model():
 
         return dSph_project
 
-    def gen_mw_foreground_num_density(self, r, z):
-        """
-        Generates the number density distribution using fit parameters for the disk & halo using:
-
-        https://faculty.washington.edu/ivezic/Publications/tomographyI.pdf
-        parameters are in Table 3.
-
-        Parameters are determined by r-i bins.
-        TABLE3Best-Fit Values (Joint Fits, Bright Parallax Relation)2Bin(R;0)L1H1fL2H2fH1.61.......   1:3<r-i<1:4  0.0058  2150 245 0.13 3261 743...1:2<ri<1:3  0.00541:1<ri<1:2  0.00461:0<ri<1:1  0.00381.70.......   0:9<ri<1:0  0.0032  2862 251 0.12 3939 647 0.005070:8<ri<0:9  0.00270:7<ri<0:8  0.00240:65<ri<0:7  0.0011
-        """
-
-        num_density_mw_bodies  = mw_num_density()
-        rhoD_0 = 1e-3*np.array([5.8, 5.4, 4.6, 3.8, 3.2, 2.7, 2.4, 1.1])
-        L1 = np.array([2150, 2862])
-        L2 = np.array([3261, 3939])
-        H1 = np.array([245, 251])
-        H2 = np.array([743, 647])
-        f = np.array([0.13, 0.12])
-        f_H = np.array([0.0, 0.00507])
-        Z_solar = 10 # 10-50 [pc] depending on paper consulted
-
-        density_matrix = num_density_mw_bodies._pdf(r, z, Z_solar, rhoD_0[0], L1[0], H1[0], f[0], L2[0], H2[0], f_H[0])
-        # parameters switch to include stars bright enough to be visible in the halo, around 1.0 > r-i > 0.9
-        for red_index in range(1, len(rhoD_0)):
-            if red_index >= 4:
-                density_matrix += num_density_mw_bodies._pdf(r, z, Z_solar, rhoD_0[red_index], L1[1], H1[1], f[1], L2[1], H2[1], f_H[1])
-            else:
-                density_matrix += num_density_mw_bodies._pdf(r, z, Z_solar, rhoD_0[red_index], L1[0], H1[0], f[0], L2[0], H2[0], f_H[0])
-        
-        return density_matrix
+class GenerateForeground():
 
     def gen_disk_pdf(self, r, z):
         """
@@ -538,58 +604,222 @@ class dSph_Model():
 
         return halo_dist
 
-    def chabrier_sample(self, m):
+    def stellar_mass_density(self, r, z):
         """
-        Provides the change in number of stars per mass bin with respect to the mass in question
+        Add together the arrays of local stellar densities
+        """
+        return self.gen_disk_pdf(r,z) + self.gen_bulge_pdf(r,z) #+ self.gen_halo_pdf(r,z)
+
+    def tdSphVec(self, gVec, eVec):
+        """
+        Function to convert galactocentric triplet vectors (cyl) to an earth-centric vector (cyl)
+        for determination of the "vision cone" of a dSph from Earth, taking the galactocentric vector as reference.
+
+        [r, theta, z]
         """
 
-        # IMPORTANT: this is dN/dm and needs the offset still!
-        imf_pdf = chabrier_imf(name='chabrier_imf')._pdf
-        if len(m) > 1:
-            chabrier_array = np.array([])
-            for mass in m:
-                chabrier_array = np.append(chabrier_array, imf_pdf(mass))
-            return chabrier_array
-        else:
-            return imf_pdf(m)
+        return np.array([gVec[0]-eVec[0]*np.cos(eVec[1]), eVec[1], gVec[2]-eVec[2]])
 
-    def imf(self, local_density, mmin=0.01, mmax=100, Mcm=10000, imf_type='Chabrier'):
+    def e2GC(self, eVec, rs):
         """
-        Generates a sample distribution for the Chabrier IMF
+        Converts from co-ordinates reached by rs in Earth's frame of reference to the galactocentric co-ordinate represntation
         """
-        mmin_log = np.log10(mmin)
-        mmax_log = np.log10(mmax)
 
-        chunksize = 10
-        result = np.array([], dtype=np.float64)
+        alpha = math.atan(rs[2] / rs[0])
+        phi = math.atan(-eVec[2] / (rs[0] * math.cos(alpha)))
 
-        while result.sum() < local_density:
-            m = np.random.uniform(mmin_log, mmax_log, size=chunksize)
-            x = np.random.uniform(0, 1, size=chunksize)
-            result = np.hstack((result, 10 ** m[x < self.chabrier_sample(m)]))
+        return np.array([eVec[0] * math.cos(np.pi/2 - phi) + rs[0] * math.cos(phi), np.pi/2 - alpha, rs[2] - eVec[2]])
 
-        return result[result.cumsum() < local_density]
-
-    def generate_stars_position(self, r, z):
+    def mCarloStar(self, p):
         """
-        Creates stars distributed at random intervals on the cylinder using finite control volumes
-        at the given radii and distances from the galactic plane.
+        Uses the Monte Carlo method to determine whether a star will be created for a given
+        number probability. Used by star_cone for N < 1 for a given control volume.
         
         Parameters
         ----------
-        r : array_like \n
-        Radii from the galactic centre (MUST NOT INCLUDE 0). \n
-        z : array_like \n
-        Distance perpendicular to the galactic plane (not disk).
+        p : float
+            Probability that a star exists within the CV, or simply N for N < 1.
         """
-        [R, Z] = np.meshgrid(r, z) # matrix needed for random generation
-        theta = list(map(lambda x : np.transpose(np.linspace(-1/x, 1/x)), r)) # generates a theta map such that the volume of the CV is held at 1 pc^3
-        phi = np.arange(0, 2*np.pi, np.pi/100) # intervals around the galactic centre, function of r to prevent overlap of CVs
-        for ri in range(len(r)):
-            for zi in range(len(z)):
-                
+        if p <= np.random.rand(1):
+            return True
+        else:
+            return False
 
-        return stars_frame
+    def genRandomPointMass(self, N, rcv, rn, nmax, rs_max, rdSph, cut_excess=True, excess_ratio=100):
+        """
+        Generates point masses with positions contained within the control volume in question,
+        using the geometry of the dSph problem to provide galactocentric co-ordinates.
+
+        Parameters
+        ----------
+        N : int/float\n
+            Number of stars expected within the CV. If it isn't a whole number, the remainder is
+            converted into a probability for an additional star to be generated.\n
+        rcv : (r, theta, z) numpy array\n
+            Vector that goes from the Earth's reference frame to the CV point.\n
+        rn : (r, theta, z) numpy array
+            Vector from the CV point to the outer boundary layer.\n
+        nmax : float \n
+            The maximum scalar value for rn which brings rcv to the outer boundary for that control volume.\n
+        rs_max : (r, theta, z) numpy array \n
+            The vector that reaches the final outer bound, corresponding to the edge of dSph.\n
+        rdSph : float \n
+            Radius of the dwarf spheroidal galaxy being evaluated.\n
+        alpha : float\n
+            Angle at which z rises corresponding to r, see default case.\n
+        cut_excess : boolean\n
+            If N is much greater than 1 at ratio excess_ratio, the probability calculation
+            just slows the calculation for marginal impact.
+        """
+        cIMF = chabrier_imf()
+        mass_df = pd.DataFrame(columns=["r", "theta", "z", "m"])
+        alpha=math.atan(rcv[2]/rcv[0])
+        beta = np.pi/2-alpha
+        # rotation matrix to go from the galactic unit vectors to
+        # the axial vector's unti vectors
+        G2A = np.array([[np.cos(beta), 0.0, -np.sin(beta)],
+                        [0.0, 1.0, 0.0],
+                        [np.cos(beta), 0.0, np.sin(beta)]])
+        # rotation matrix to go from axial unit vectors to the mass point unit vectors
+        E2P = lambda theta : np.array([[np.cos(theta), np.sin(theta), 0.0],
+                                       [-np.sin(theta), np.cos(theta), 0.0],
+                                       [0.0, 0.0, 1.0]])
+        # local number is less than 1, use the monte carlo method to randomly determine if a star will be generated
+        if (N < 1):
+            if (self.mCarloStar(N)):
+                m = cIMF._rvs()
+                n = np.random.rand(1) * (nmax - (-nmax)) - nmax # random position along the axial vector
+                ax_pos = rcv + rn*n
+                h_frac = np.sqrt(ax_pos[0]**2+ax_pos[2]**2)/np.sqrt(rs_max[0]**2+rs_max[2]**2)
+                s_max = h_frac * rdSph # cone boundary based on problem symmetry
+                theta = np.random.rand(1) * 2 * np.pi # random angle within the cone
+                s = np.random.rand(1) * s_max # random value along the radial vector between 0 and s_max
+                z = ax_pos[2] * np.cos(beta) - s * np.sin(beta) * np.cos(theta)
+                r = ax_pos[0] * np.cos(beta) * np.cos(theta) + ax_pos[2] * np.sin(beta)
+                mass_df.append({"r":r,'theta':theta,'z':z,'m':m})
+            return mass_df
+        # include the extra as a percentage to generate another star
+        if (N > 1 and N < N * excess_ratio):
+            for i in range(int(N)):
+                m = cIMF._rvs()
+                n = np.random.rand(1) * (nmax - (-nmax)) - nmax # random position along the axial vector
+                ax_pos = rcv + rn*n
+                h_frac = np.sqrt(ax_pos[0]**2+ax_pos[2]**2)/np.sqrt(rs_max[0]**2+rs_max[2]**2)
+                s_max = h_frac * rdSph # cone boundary based on problem symmetry
+                theta = np.random.rand(1) * 2 * np.pi # random angle within the cone
+                s = np.random.rand(1) * s_max # random value along the radial vector between 0 and s_max
+                z = ax_pos[2] * np.cos(beta) - s * np.sin(beta) * np.cos(theta)
+                r = ax_pos[0] * np.cos(beta) * np.cos(theta) + ax_pos[2] * np.sin(beta)
+                mass_df.append({"r":r,'theta':theta,'z':z,'m':m})
+            if (self.mCarloStar(N-int(N))):
+                m = cIMF._rvs()
+                n = np.random.rand(1) * (nmax - (-nmax)) - nmax # random position along the axial vector
+                ax_pos = rcv + rn*n
+                h_frac = np.sqrt(ax_pos[0]**2+ax_pos[2]**2)/np.sqrt(rs_max[0]**2+rs_max[2]**2)
+                s_max = h_frac * rdSph # cone boundary based on problem symmetry
+                theta = np.random.rand(1) * 2 * np.pi # random angle within the cone
+                s = np.random.rand(1) * s_max # random value along the radial vector between 0 and s_max
+                z = ax_pos[2] * np.cos(beta) - s * np.sin(beta) * np.cos(theta)
+                r = ax_pos[0] * np.cos(beta) * np.cos(theta) + ax_pos[2] * np.sin(beta)
+                mass_df.append({"r":r,'theta':theta,'z':z,'m':m})
+            return mass_df
+        # many stars, no need to including percentage chance for this CV
+        if (N > excess_ratio * N):
+            for i in range(int(N)):
+                m = cIMF._rvs()
+                n = np.random.rand(1) * (nmax - (-nmax)) - nmax # random position along the axial vector
+                ax_pos = rcv + rn*n
+                h_frac = np.sqrt(ax_pos[0]**2+ax_pos[2]**2)/np.sqrt(rs_max[0]**2+rs_max[2]**2)
+                s_max = h_frac * rdSph # cone boundary based on problem symmetry
+                theta = np.random.rand(1) * 2 * np.pi # random angle within the cone
+                s = np.random.rand(1) * s_max # random value along the radial vector between 0 and s_max
+                z = ax_pos[2] * np.cos(beta) - s * np.sin(beta) * np.cos(theta)
+                r = ax_pos[0] * np.cos(beta) * np.cos(theta) + ax_pos[2] * np.sin(beta)
+                mass_df.append({"r":r,'theta':theta,'z':z,'m':m})
+            return mass_df
+
+    def starCone(self, rG=10e3, zG=20e3, r_dSph=1e3, theta=np.pi/8, rE=8e3, zE=43):
+        """
+        Creates a cone of stars within the field of view of a dwarf spheroidal galaxy as foreground noise
+        relative to the position of earth from galactocentric coordinates.
+
+        Parameters
+        ----------
+        rG : float
+            Galactocentric radius for which the centre of the viewed dSph exists [pc]
+        zG : float
+            Distance above the galactic plane where the core the core of the dSph resides [pc]
+        rdSph : float
+            Radius of the dSph [pc]
+        phi : float
+            Angle from the galactic normal vector to the anti-norml vector [rad]
+        theta : float
+            Angle in the galactic plane relative to the radial vector to earth [rad]
+        rE : float
+            Current galactocentric radius at which Earth exists in the galactic plane [pc]
+        zE : float
+            Distance above the galactic plane at which Earth exists [pc]
+
+        Returns
+        -------
+        star_cone : dataframe
+            Generated star masses and their positions {[pc],[pc],[pc],[solar masses]}
+        """
+        # IMF used, more could be implemented later
+        imf = chabrier_imf()
+        bulge_mass_dist = bulge_gen()
+        disk_mass_dist = disk_gen()
+        # integration bounds for number density normalization
+        m_min = 10**(-1)
+        m_max = 10**2
+
+        gVec = np.array([rG, 0, zG]) # galaxy core to core of dSph
+        eVec = np.array([rE, theta, zE]) # galaxy core to Earth
+        rsVec = self.tdSphVec(gVec, eVec) # Earth to core of dSph
+
+        rs = rsVec[0] # radial distance from Earth to dSph core
+        zs = rsVec[2] # perpendicular distance from the plane of Earth parallel to the galactic plane
+        alpha = math.atan(rsVec[2] / rs) # angle of climb of the central axis of the "view cone"
+        phi = math.atan(-eVec[2] / rs) # angle of Earth's radial vector projection (rs) relative to the GC's (rG)
+        rs_mag = np.sqrt(rs**2 + zs**2) # magnitude the Earth to dSph vector
+        rs_hat = rsVec / rs_mag # unit vector for Earth to dSph
+        radial_slope = r_dSph / rs_mag # scaling parameter for CV calculations
+
+        # volume of a cone section, using the relationship for a total cone radius and height. Takes smaller radius and 
+        # cone section height; a byproduct of a new unused method
+        CV_func = lambda h,r : np.pi/3*(3*r**2*h + 3*radial_slope*r*h**2 + radial_slope*2*h**3) # volume of a cone section
+        # generate log spaced lines to subdivide the cone with greater resolution near Earth
+        outer_bound = np.logspace(0, math.log(rs_mag - r_dSph, 10), num=20)
+        # enclose these as control volumes
+        inner_bound = np.hstack(([0.0], [outer_bound[i] for i in range(len(outer_bound)-1)]))
+        # find the centre point of the vector spanning the height of the control volume
+        cv_point = np.fromiter(map(lambda i : (outer_bound[i] - outer_bound[i-1])/2 + outer_bound[i-1], range(1, len(outer_bound)-1)), np.float64)
+        # determine the radius of the vision cone for a given distance along the line of sight vector
+        bound_r = np.hstack((np.fromiter(map(lambda i : inner_bound[i]*radial_slope, range(len(inner_bound))), np.float64), r_dSph))
+        # match up the volume of each CV to the corresponding radius
+        deltaV = np.fromiter(map(lambda i : CV_func(outer_bound[i] - outer_bound[i-1], bound_r[i-1]), range(1,len(outer_bound)-1)), np.float64)
+        # stellar number normaliztion numerator
+        [intNum, numErr] = quad(lambda m : imf._pdf(m), a=m_min, b=m_max)
+        # stellar number normaliztion denominator
+        [intDenom, denomErr] = quad(lambda m : imf._pdf(m)*m, a=m_min, b=m_max)
+        # stellar number normalization for the Chabrier IMF with 
+        n_normalization = intNum / intDenom
+        # get the galactocentric co-ordinates for the equivalent Earth reference frame vector along rs
+        rsEarth = np.array([cv_point * math.cos(alpha), np.zeros(len(cv_point)), cv_point * math.sin(alpha)]).T
+        eVec2D = np.array([eVec[0]*np.ones(len(cv_point)), eVec[1]*np.ones(len(cv_point)), eVec[2]*np.ones(len(cv_point))]).T
+        axial_vector = np.zeros(shape=rsEarth.shape)
+        for i in range(len(cv_point)):
+            axial_vector[i,:] = self.e2GC(np.asarray(eVec2D[i][:]), np.asarray(rsEarth[i][:]))
+        bulge_mass = bulge_mass_dist._pdf(axial_vector[:,0], axial_vector[:,2])
+        disk_mass = disk_mass_dist._pdf(axial_vector[:,0], axial_vector[:,2])
+        # number of stars in a given control volume
+        N_bulge = n_normalization * bulge_mass * deltaV
+        N_disk = n_normalization * disk_mass * deltaV
+        
+        for i in range(len(outer_bound)):
+            rn = (outer_bound[i] - inner_bound[i])/2 # distance between each bound and the CV point
+            nmax = rn * np.cos(alpha) / rs_hat # multiple of rs_hat to go from CV point to the bounds (+/-)
+        # for a number less than one, apply that as the probability to generate a star
 
     def anotherDMdensityFunction(self, r, profile, rs, g, rho0, R0):
         """
@@ -612,7 +842,6 @@ class dSph_Model():
             rhos=rho0*(1+u)*(1+u**2);
             rho = rhos/(1+u)/(1+u**2);
             return rho
-        
         else:
             return 
 
@@ -627,7 +856,7 @@ class dSph_Model():
             phi[i] = -4*np.pi*self.kpc*self.GN/r[i]**2*quad(rho_integrand, 0, r[i])
         return phi
 
-    def bulge_omega(self, r):
+    def bulgeDphiDr(self, r):
         """
 
         """
@@ -635,7 +864,7 @@ class dSph_Model():
         dphidr = -1/(r+co)**2
         return dphidr
 
-    def disk_omega(self, r):
+    def diskDphiDr(self, r):
         """
 
         """
@@ -643,22 +872,27 @@ class dSph_Model():
         dphidr = -1/r**2*(1-np.exp(-r/bd)) + 1/(r*bd)*np.exp(-r/bd)
         return dphidr
 
-    def MW_velocity_dispersions(self, r, profile, rs, g, rho0, R0):
+    def MWDispersions(self, s, z, profile, rs, g, rho0, R0):
         """
         Calculation of velocity dispersions using the Jeans relationship for the disk, bulge and DM in the MW
         """
         self.Msun = 2e30 # kg
-        self.Mb = 1.5e10*Msun # kg Bulge mass
-        self.Md = 7e10*Msun # kg Disk mass
-        self.GN = 6.67e-11 # SI units
+        self.Mb = 1.5e10 * Msun # kg Bulge mass
+        self.Md = 7e10 * Msun # kg Disk mass
+        self.GN = 6.67e-11 # m^3 kg^-1 s^-2
         self.kpc = 3.086e19 # m
         self.GeV = 1.78e-27 # kg
 
+        mass_density = self.stellar_mass_density(s, z)
+        r = self.cylRay2Sph(s, z)
+
         dm_disp, bulge_disp, disk_disp = np.zeros(shape=(1,len(r)))
 
-        phi_bulge = lambda r : self.GN*self.Mb/self.kpc**2*self.bulge_omega(r)
-        phi_disk = lambda r : self.GN*self.Md/self.kpc**2*self.disk_omega(r)
-        rhodm = lambda x : self.anotherDMdensityFunction(x, profile, rs, g, rho0, R0)
+        phi_bulge = lambda r : self.GN*self.Mb/self.kpc**2*self.bulgeDphiDr(r)
+        phi_disk = lambda r : self.GN*self.Md/self.kpc**2*self.diskDphiDr(r)
+        rhodm = mass_density # need stellar mass density
+        # halo and bulge spherically symetric but disk not -> important distinction!
+        # z comp. of the disk -> assume DM doesn't vary as much
 
         DMintegrand = lambda x : rhodm(x)*self.phidm(x, profile, rs, g, rho0, R0)
         BulgeIntegrand = lambda x : self.rhodm(x)*phi_bulge(x)

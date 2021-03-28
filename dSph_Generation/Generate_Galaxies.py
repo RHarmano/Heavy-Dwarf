@@ -14,7 +14,7 @@ import scipy.stats.distributions as st
 from scipy.integrate import quad, solve_ivp
 from scipy.interpolate import interp1d
 from scipy.stats import norm
-from dSph_Model import dSph_Model
+from dSph_Model import dSph_Model, chabrier_imf
 import matplotlib.cm as cm
 from matplotlib.ticker import LogLocator
 import matplotlib.pyplot as plt
@@ -123,8 +123,10 @@ if __name__ == '__main__':
 
             # Produce the galaxy distribution and add it to the dataframe
             R, Z = np.meshgrid(r_eval, z_array)
+            dSph_galaxy_model.starCone(r_dSph=2e3)
             # disk_density = dSph_galaxy_model.gen_disk_foreground(r_eval, z_array)
-            print(dSph_galaxy_model.imf())
+            # stars_frame = dSph_galaxy_model.generate_stars_position(r_eval, z_array)
+            # stars_frame.to_csv("stars_position.csv")
             # bulge_density = dSph_galaxy_model.gen_bulge_foreground(R, Z)
             # disk_density += bulge_density
 
